@@ -1,0 +1,56 @@
+# Build results
+[Dd]ebug/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+[Bb]in/
+[Oo]bj/
+[Ll]ib/
+[Bb]ld/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.db
+*.db-shm
+*.db-wal
+*.pdb
+*.cache
+
+# NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+!**/[Pp]ackages/repositories.config
+packages/
+*.nuspec
+*.psmdcp
+
+# Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.trx
+*.coverage
+*.coveragexml
+
+# Rider / ReSharper
+.idea/
+*.sln.iml
+*.DotSettings.user
+_ReSharper*/
+*.DotSettings
+
+# ASP.NET / Blazor runtime files
+App_Data/
+node_modules/
+wwwroot/lib/

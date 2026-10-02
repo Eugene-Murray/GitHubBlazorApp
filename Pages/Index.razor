@@ -1,0 +1,357 @@
+﻿@page "/"
+@using GitHubBlazorApp.Models
+@using GitHubBlazorApp.Services
+@inject GitHubClientService GitHubClient
+
+<PageTitle>GitHub Repo Manager</PageTitle>
+
+<h1>GitHub Repository Manager</h1>
+
+@if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger" role="alert">@errorMessage</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(statusMessage))
+{
+    <div class="alert alert-success" role="alert">@statusMessage</div>
+}
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h2 class="h4">Connect</h2>
+        <div class="row g-3 align-items-end">
+            <div class="col-md-8">
+                <label for="github-token" class="form-label">GitHub personal access token</label>
+                <input id="github-token" type="password" class="form-control" @bind="token" placeholder="ghp_..." />
+            </div>
+            <div class="col-md-4">
+                <button class="btn btn-primary w-100" @onclick="ConnectAsync" disabled="@isLoading">
+                    @(isLoading ? "Connecting..." : "Connect")
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (currentUser is not null)
+{
+    <div class="card mb-4">
+        <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-3">
+            <div>
+                <h2 class="h4 mb-1">Logged in as @currentUser.Login</h2>
+                @if (!string.IsNullOrWhiteSpace(currentUser.Name))
+                {
+                    <small class="text-muted">@currentUser.Name</small>
+                }
+            </div>
+            <button class="btn btn-outline-secondary" @onclick="RefreshRepositoriesAsync" disabled="@isLoading">
+                Refresh repositories
+            </button>
+        </div>
+    </div>
+}
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h2 class="h4">Create repository</h2>
+                <div class="mb-3">
+                    <label class="form-label">Repository name</label>
+                    <input class="form-control" @bind="newRepositoryName" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Description</label>
+                    <input class="form-control" @bind="newRepositoryDescription" />
+                </div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="repo-private" @bind="newRepositoryIsPrivate" />
+                    <label class="form-check-label" for="repo-private">Private repository</label>
+                </div>
+                <button class="btn btn-success" @onclick="CreateRepositoryAsync" disabled="@isLoading">
+                    Create repository
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h2 class="h4">Create branch</h2>
+                <div class="mb-3">
+                    <label class="form-label">Repository</label>
+                    <select class="form-select" value="@selectedRepositoryFullName" @onchange="OnSelectedRepositoryChanged">
+                        @if (repositories.Count == 0)
+                        {
+                            <option value="">No repositories loaded</option>
+                        }
+                        else
+                        {
+                            @foreach (var repo in repositories)
+                            {
+                                <option value="@repo.FullName">@repo.FullName</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Base branch</label>
+                    <select class="form-select" @bind="selectedBaseBranch">
+                        @if (selectedRepository is not null)
+                        {
+                            @foreach (var branch in GetSelectedBranches())
+                            {
+                                <option value="@branch.Name">@branch.Name</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">New branch name</label>
+                    <input class="form-control" @bind="newBranchName" />
+                </div>
+                <button class="btn btn-primary" @onclick="CreateBranchAsync" disabled="@isLoading">
+                    Create branch
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <h2 class="h4">Repositories</h2>
+
+        @if (repositories.Count == 0)
+        {
+            <p class="text-muted mb-0">No repositories loaded yet. Connect with a GitHub token to view them.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-striped align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Visibility</th>
+                            <th>Default branch</th>
+                            <th>Link</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var repo in repositories)
+                        {
+                            <tr>
+                                <td>@repo.FullName</td>
+                                <td>@(repo.IsPrivate ? "Private" : "Public")</td>
+                                <td>@repo.DefaultBranch</td>
+                                <td>
+                                    <a href="@repo.HtmlUrl" target="_blank" rel="noreferrer">Open</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private string token = string.Empty;
+    private string errorMessage = string.Empty;
+    private string statusMessage = string.Empty;
+    private bool isLoading;
+    private GitHubUser? currentUser;
+    private List<GitHubRepository> repositories = new();
+    private Dictionary<string, List<GitHubBranch>> branchCache = new();
+    private string selectedRepositoryFullName = string.Empty;
+    private string selectedBaseBranch = string.Empty;
+    private string newRepositoryName = string.Empty;
+    private string newRepositoryDescription = string.Empty;
+    private bool newRepositoryIsPrivate = true;
+    private string newBranchName = string.Empty;
+
+    private GitHubRepository? selectedRepository => repositories.FirstOrDefault(r => r.FullName == selectedRepositoryFullName);
+
+    private List<GitHubBranch> GetSelectedBranches()
+    {
+        if (selectedRepository is null)
+        {
+            return new List<GitHubBranch>();
+        }
+
+        return branchCache.TryGetValue(selectedRepository.FullName, out var branches)
+            ? branches
+            : new List<GitHubBranch>();
+    }
+
+    private async Task ConnectAsync()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = string.Empty;
+            statusMessage = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException("Enter a GitHub personal access token before connecting.");
+            }
+
+            GitHubClient.SetToken(token);
+            currentUser = await GitHubClient.GetCurrentUserAsync();
+            await RefreshRepositoriesAsync();
+            statusMessage = $"Connected to GitHub as {currentUser.Login}.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            currentUser = null;
+            repositories.Clear();
+            selectedRepositoryFullName = string.Empty;
+            selectedBaseBranch = string.Empty;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task RefreshRepositoriesAsync()
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return;
+        }
+
+        try
+        {
+            isLoading = true;
+            errorMessage = string.Empty;
+            repositories = await GitHubClient.GetRepositoriesAsync();
+
+            if (repositories.Count > 0)
+            {
+                selectedRepositoryFullName = repositories.First().FullName;
+                await LoadBranchesAsync(repositories.First());
+            }
+            else
+            {
+                selectedRepositoryFullName = string.Empty;
+                selectedBaseBranch = string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task OnSelectedRepositoryChanged(ChangeEventArgs args)
+    {
+        selectedRepositoryFullName = args.Value?.ToString() ?? string.Empty;
+        if (selectedRepository is null)
+        {
+            selectedBaseBranch = string.Empty;
+            return;
+        }
+
+        await LoadBranchesAsync(selectedRepository);
+    }
+
+    private async Task LoadBranchesAsync(GitHubRepository repo)
+    {
+        if (branchCache.TryGetValue(repo.FullName, out var cachedBranches) && cachedBranches.Count > 0)
+        {
+            selectedBaseBranch = cachedBranches.First().Name;
+            return;
+        }
+
+        var branches = await GitHubClient.GetBranchesAsync(repo.Owner, repo.Name);
+        branchCache[repo.FullName] = branches;
+
+        if (branches.Count > 0)
+        {
+            selectedBaseBranch = branches.First().Name;
+        }
+        else
+        {
+            selectedBaseBranch = repo.DefaultBranch;
+        }
+    }
+
+    private async Task CreateRepositoryAsync()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(newRepositoryName))
+            {
+                throw new InvalidOperationException("Repository name is required.");
+            }
+
+            var repo = await GitHubClient.CreateRepositoryAsync(newRepositoryName.Trim(), newRepositoryIsPrivate, newRepositoryDescription);
+            repositories.Insert(0, repo);
+            selectedRepositoryFullName = repo.FullName;
+            newRepositoryName = string.Empty;
+            newRepositoryDescription = string.Empty;
+            statusMessage = $"Repository '{repo.FullName}' created successfully.";
+            await LoadBranchesAsync(repo);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task CreateBranchAsync()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = string.Empty;
+
+            if (selectedRepository is null)
+            {
+                throw new InvalidOperationException("Select a repository before creating a branch.");
+            }
+
+            if (string.IsNullOrWhiteSpace(newBranchName))
+            {
+                throw new InvalidOperationException("New branch name is required.");
+            }
+
+            if (string.IsNullOrWhiteSpace(selectedBaseBranch))
+            {
+                throw new InvalidOperationException("Select a base branch first.");
+            }
+
+            var branch = await GitHubClient.CreateBranchAsync(selectedRepository.Owner, selectedRepository.Name, newBranchName, selectedBaseBranch);
+            newBranchName = string.Empty;
+            statusMessage = $"Branch '{branch.Name}' created in {selectedRepository.FullName}.";
+            await LoadBranchesAsync(selectedRepository);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}
+
